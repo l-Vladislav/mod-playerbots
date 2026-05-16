@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <boost/thread/thread.hpp>
+#include <cmath>
 #include <cstdlib>
 #include <ctime>
 #include <iomanip>
@@ -374,6 +375,13 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 /*elapsed*/, bool /*minimal*/)
     {
         if (time(nullptr) > (PlayersCheckTimer + 60))
             sRandomPlayerbotMgr.CheckPlayers();
+    }
+
+    if (sPlayerbotAIConfig.preferRealPlayerZones)
+    {
+        uint32 refresh = sPlayerbotAIConfig.realPlayerZoneRefreshInterval;
+        if (refresh && time(nullptr) > (ActiveZonesRefreshTimer + (time_t)refresh))
+            sRandomPlayerbotMgr.RefreshActiveZones();
     }
 
     if (sPlayerbotAIConfig.randomBotJoinBG /* && !players.empty()*/)
@@ -1312,6 +1320,74 @@ void RandomPlayerbotMgr::CheckPlayers()
     LOG_INFO("playerbots", "Max player level is {}, max bot level set to {}", playersLevel - 3, playersLevel);
 }
 
+void RandomPlayerbotMgr::RefreshActiveZones()
+{
+    ActiveZonesRefreshTimer = time(nullptr);
+    activePlayerLocations.clear();
+
+    // First pass: snapshot real-player positions.
+    for (Player* player : players)
+    {
+        if (!player || !player->IsInWorld())
+            continue;
+        if (player->IsGameMaster() && !player->IsVisible())
+            continue;
+        PlayerbotAI* botAI = GET_PLAYERBOT_AI(player);
+        if (botAI && !botAI->IsRealPlayer() && !botAI->HasRealPlayerMaster())
+            continue;
+
+        ActivePlayerLocation loc;
+        loc.mapId = player->GetMapId();
+        loc.x = player->GetPositionX();
+        loc.y = player->GetPositionY();
+        loc.z = player->GetPositionZ();
+        loc.zoneId = player->GetZoneId();
+        loc.level = player->GetLevel();
+        loc.name = player->GetName();
+        loc.biasedCount = 0;
+        loc.zoneBotCount = 0;
+        loc.zoneRealPlayerCount = 0;
+        activePlayerLocations.push_back(loc);
+    }
+
+    if (activePlayerLocations.empty())
+    {
+        LOG_DEBUG("playerbots", "RefreshActiveZones: no real players tracked");
+        return;
+    }
+
+    // Second pass: count bots per zone of interest. Build a set of zones to count
+    // so we don't scan zones nobody is in.
+    std::unordered_set<uint32> watchedZones;
+    for (auto const& loc : activePlayerLocations)
+        watchedZones.insert(loc.zoneId);
+
+    std::unordered_map<uint32, uint32> zoneBotCount;
+    for (auto const& [guid, botPlayer] : playerBots)
+    {
+        if (!botPlayer || !botPlayer->IsInWorld())
+            continue;
+        uint32 z = botPlayer->GetZoneId();
+        if (watchedZones.count(z))
+            zoneBotCount[z]++;
+    }
+
+    // Third pass: count real players per zone (multiple players may share a zone).
+    std::unordered_map<uint32, uint32> zonePlayerCount;
+    for (auto const& loc : activePlayerLocations)
+        zonePlayerCount[loc.zoneId]++;
+
+    // Cache counts into each player location.
+    for (auto& loc : activePlayerLocations)
+    {
+        loc.zoneBotCount = zoneBotCount[loc.zoneId];
+        loc.zoneRealPlayerCount = zonePlayerCount[loc.zoneId];
+    }
+
+    LOG_DEBUG("playerbots", "RefreshActiveZones: {} real player location(s) tracked across {} zone(s)",
+              activePlayerLocations.size(), watchedZones.size());
+}
+
 void RandomPlayerbotMgr::ScheduleRandomize(uint32 bot, uint32 time) { SetEventValue(bot, "randomize", 1, time); }
 
 void RandomPlayerbotMgr::ScheduleTeleport(uint32 bot, uint32 time)
@@ -1626,11 +1702,29 @@ void RandomPlayerbotMgr::RandomTeleport(Player* bot, std::vector<WorldLocation>&
                                    return i == sPlayerbotAIConfig.randomBotMaps.end();
                                }),
                 tlocs.end());
+    // Gate expansion continents by bot level: under-level bots should not be teleported
+    // to Outland (map 530) or Northrend (map 571).
+    uint32 botLevel = bot->GetLevel();
+    tlocs.erase(std::remove_if(tlocs.begin(), tlocs.end(),
+                               [botLevel](WorldPosition l)
+                               {
+                                   uint32 m = l.GetMapId();
+                                   if (m == 530 && botLevel < sPlayerbotAIConfig.minLevelOutland)
+                                       return true;
+                                   if (m == 571 && botLevel < sPlayerbotAIConfig.minLevelNorthrend)
+                                       return true;
+                                   return false;
+                               }),
+                tlocs.end());
     if (tlocs.empty())
     {
         LOG_DEBUG("playerbots", "Cannot teleport bot {} - all locations removed by filter", bot->GetName().c_str());
         return;
     }
+
+    // Real-player position bias is handled upstream in RandomTeleportForLevel by
+    // injecting a single WorldLocation near the real player. By the time we reach
+    // here, locs is either that injection (size 1) or the normal candidate pool.
 
     PerfMonitorOperation* pmo = sPerfMonitor.start(PERF_MON_RNDBOT, "RandomTeleportByLocations");
 
@@ -1767,6 +1861,88 @@ void RandomPlayerbotMgr::RandomTeleportForLevel(Player* bot)
 {
     if (bot->InBattleground())
         return;
+
+    // Real-player position bias: with PreferRealPlayerZoneChance probability,
+    // teleport this bot near a real player whose level overlaps. Each player can
+    // attract at most MaxBotsPerPlayer bots between refreshes.
+    if (sPlayerbotAIConfig.preferRealPlayerZones && !activePlayerLocations.empty() &&
+        frand(0.f, 1.f) < sPlayerbotAIConfig.preferRealPlayerZoneChance)
+    {
+        std::vector<ActivePlayerLocation*> eligible;
+        int32 tol = sPlayerbotAIConfig.playerBiasLevelTolerance;
+        uint32 botLevel = bot->GetLevel();
+        for (auto& p : activePlayerLocations)
+        {
+            if (p.biasedCount >= sPlayerbotAIConfig.maxBotsPerPlayer)
+                continue;
+            int32 diff = (int32)botLevel - (int32)p.level;
+            if (diff < -tol || diff > tol)
+                continue;
+            // Zone saturation gate: only inject when the zone currently has fewer
+            // than 50% * MaxBotsPerPlayer * realPlayersInZone bots. Once the zone
+            // is half-full relative to its per-player allocation, stop pulling more.
+            float saturationLimit =
+                0.5f * (float)sPlayerbotAIConfig.maxBotsPerPlayer * (float)p.zoneRealPlayerCount;
+            if ((float)p.zoneBotCount >= saturationLimit)
+                continue;
+            eligible.push_back(&p);
+        }
+
+        if (!eligible.empty())
+        {
+            ActivePlayerLocation* target = eligible[urand(0, eligible.size() - 1)];
+
+            // Generate several candidate drop-points around the player so the inner
+            // RandomTeleport loop can pick the first valid one (some random offsets
+            // land in water/lava/off-mesh and get rejected).
+            std::vector<WorldLocation> locs;
+            const uint32 numCandidates = 8;
+            for (uint32 i = 0; i < numCandidates; ++i)
+            {
+                float angle = frand(0.f, 2.f * (float)M_PI);
+                float dist = frand(sPlayerbotAIConfig.playerBiasMinRadius,
+                                   sPlayerbotAIConfig.playerBiasMaxRadius);
+                locs.push_back(WorldLocation(target->mapId,
+                                             target->x + cos(angle) * dist,
+                                             target->y + sin(angle) * dist,
+                                             target->z, 0));
+            }
+
+            // Reserve the slot up front. Detecting arrival after RandomTeleport is
+            // unreliable because TeleportTo can short-circuit (e.g. HasPlayerNearby
+            // safety check inside RandomTeleport breaks without moving the bot). With
+            // 8 candidate offsets the actual placement rarely fails — the small waste
+            // from slot-but-no-arrival is acceptable.
+            target->biasedCount++;
+            // Roll the cached zone bot count forward so subsequent eligibility checks
+            // in the same sweep see updated saturation. Bump the count for every other
+            // tracked player sharing this zone, since they share the same zone bots.
+            for (auto& p : activePlayerLocations)
+                if (p.zoneId == target->zoneId)
+                    p.zoneBotCount++;
+            LOG_INFO("playerbots",
+                     "PlayerPosBias bot={} lvl={} -> near {} lvl={} ({}/{} pulled, "
+                     "zoneBots={}/{}*{}=lim {})",
+                     bot->GetName().c_str(), botLevel, target->name.c_str(), target->level,
+                     target->biasedCount, sPlayerbotAIConfig.maxBotsPerPlayer,
+                     target->zoneBotCount, sPlayerbotAIConfig.maxBotsPerPlayer,
+                     target->zoneRealPlayerCount,
+                     (uint32)(0.5f * (float)sPlayerbotAIConfig.maxBotsPerPlayer *
+                              (float)target->zoneRealPlayerCount));
+
+            RandomTeleport(bot, locs, false);
+
+            if (PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot))
+            {
+                if (!sPlayerbotAIConfig.playerBiasArrivalStrategy.empty())
+                {
+                    botAI->ChangeStrategy(sPlayerbotAIConfig.playerBiasArrivalStrategy,
+                                          BOT_STATE_NON_COMBAT);
+                }
+            }
+            return;
+        }
+    }
 
     if (bot->GetLevel() >= 10 && urand(0, 100) < sPlayerbotAIConfig.probTeleToBankers * 100)
     {
@@ -2402,6 +2578,45 @@ bool RandomPlayerbotMgr::HandlePlayerbotConsoleCommand(ChatHandler* handler, cha
     if (cmd == "update")
     {
         sRandomPlayerbotMgr.UpdateAIInternal(0);
+        return true;
+    }
+
+    if (cmd == "zones_refresh" || cmd == "refresh_zones")
+    {
+        sRandomPlayerbotMgr.RefreshActiveZones();
+        std::ostringstream ss;
+        ss << "Refreshed: " << sRandomPlayerbotMgr.activePlayerLocations.size() << " real player(s) tracked";
+        for (auto const& p : sRandomPlayerbotMgr.activePlayerLocations)
+            ss << " | " << p.name << " lvl=" << p.level << " map=" << p.mapId << " zone=" << p.zoneId;
+        if (handler)
+            handler->PSendSysMessage("{}", ss.str());
+        LOG_INFO("playerbots", "{}", ss.str());
+        return true;
+    }
+
+    if (cmd == "zones")
+    {
+        std::ostringstream ss;
+        ss << "Active players (" << sRandomPlayerbotMgr.activePlayerLocations.size() << "):";
+        if (sRandomPlayerbotMgr.activePlayerLocations.empty())
+        {
+            ss << " <none>";
+        }
+        else
+        {
+            uint32 cap = sPlayerbotAIConfig.maxBotsPerPlayer;
+            for (auto const& p : sRandomPlayerbotMgr.activePlayerLocations)
+            {
+                uint32 satLimit = (uint32)(0.5f * (float)cap * (float)p.zoneRealPlayerCount);
+                ss << " | " << p.name << " lvl=" << p.level << " map=" << p.mapId
+                   << " zone=" << p.zoneId << " biased=" << p.biasedCount << "/" << cap
+                   << " zoneBots=" << p.zoneBotCount << "/" << satLimit
+                   << " (real=" << p.zoneRealPlayerCount << ")";
+            }
+        }
+        if (handler)
+            handler->PSendSysMessage("{}", ss.str());
+        LOG_INFO("playerbots", "{}", ss.str());
         return true;
     }
 

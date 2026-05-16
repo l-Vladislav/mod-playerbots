@@ -152,6 +152,7 @@ public:
     void CheckBgQueue();
     void CheckLfgQueue();
     void CheckPlayers();
+    void RefreshActiveZones();
     void LogBattlegroundInfo();
 
     std::map<TeamId, std::map<BattlegroundTypeId, std::vector<uint32>>> getBattleMastersCache()
@@ -229,6 +230,21 @@ private:
     time_t BgCheckTimer;
     time_t LfgCheckTimer;
     time_t PlayersCheckTimer;
+    time_t ActiveZonesRefreshTimer = 0;
+    struct ActivePlayerLocation
+    {
+        uint32 mapId;
+        float x;
+        float y;
+        float z;
+        uint32 zoneId;
+        uint32 level;
+        std::string name;
+        uint32 biasedCount;
+        uint32 zoneBotCount;          // bots currently in the same zone (snapshot at last refresh)
+        uint32 zoneRealPlayerCount;   // real players in the same zone (incl. this one)
+    };
+    std::vector<ActivePlayerLocation> activePlayerLocations;
     time_t RealPlayerLastTimeSeen = 0;
     time_t DelayLoginBotsTimer;
     time_t printStatsTimer;
