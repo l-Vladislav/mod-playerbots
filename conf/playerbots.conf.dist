@@ -2440,3 +2440,76 @@ AiPlayerbot.SummonAtInnkeepersEnabled = 1
 # Buffs will be applied on PP, Sindragosa and Lich King
 
 AiPlayerbot.EnableICCBuffs = 1
+
+#    AiPlayerbot.PreferRealPlayerZones
+#        Description: When enabled, biases random-teleport destinations toward zones that
+#                     currently contain at least one real (non-bot) player. Falls back to
+#                     the full candidate list if no candidates match an active zone or the
+#                     chance roll fails, so the world still feels populated elsewhere.
+#        Default:     0  - (Disabled)
+#                     1  - (Enabled)
+
+AiPlayerbot.PreferRealPlayerZones = 0
+
+#    AiPlayerbot.PreferRealPlayerZoneChance
+#        Description: Probability (0.0 - 1.0) that a given teleport will restrict its
+#                     candidate pool to active zones (zones with real players). The rest
+#                     of the time the bot teleports normally. Only used when
+#                     PreferRealPlayerZones = 1.
+#        Default:     0.75
+
+AiPlayerbot.PreferRealPlayerZoneChance = 0.75
+
+#    AiPlayerbot.RealPlayerZoneRefreshInterval
+#        Description: Seconds between refreshes of the active-zone set (the snapshot of
+#                     zones currently containing real players). Lower = bots react faster
+#                     when you change zones; higher = lower CPU cost. Only used when
+#                     PreferRealPlayerZones = 1.
+#        Default:     900  - (15 minutes)
+
+AiPlayerbot.RealPlayerZoneRefreshInterval = 900
+
+#    AiPlayerbot.MaxBotsPerPlayer
+#        Description: Cap on how many random bots get teleported to each real player's
+#                     position per refresh window. Counter resets on every refresh.
+#        Default:     5
+
+AiPlayerbot.MaxBotsPerPlayer = 5
+
+#    AiPlayerbot.PlayerBiasMinRadius
+#    AiPlayerbot.PlayerBiasMaxRadius
+#        Description: Bots biased toward a real player are dropped at a random angle and
+#                     at a random distance in [MinRadius, MaxRadius] yards from the
+#                     player's exact coordinates.
+#        Default:     50 / 100
+
+AiPlayerbot.PlayerBiasMinRadius = 50
+AiPlayerbot.PlayerBiasMaxRadius = 100
+
+#    AiPlayerbot.PlayerBiasLevelTolerance
+#        Description: A bot is eligible for the real-player bias only if its level is
+#                     within +/- this value of the target player's level. Prevents
+#                     low-level bots from being teleported into a high-level zone.
+#        Default:     10
+
+AiPlayerbot.PlayerBiasLevelTolerance = 10
+
+#    AiPlayerbot.PlayerBiasArrivalStrategy
+#        Description: Strategy expression applied with ChangeStrategy() right after a
+#                     biased bot is teleported near a real player. Empty disables.
+#                     Default makes them attack nearby mobs and stops the travel/rpg
+#                     AI from immediately picking a route away.
+#        Default:     +grind,-travel,-rpg
+
+AiPlayerbot.PlayerBiasArrivalStrategy = +grind,-travel,-rpg
+
+#    AiPlayerbot.MinLevelOutland
+#    AiPlayerbot.MinLevelNorthrend
+#        Description: Minimum bot level required to be teleported to Outland (map 530)
+#                     and Northrend (map 571). Bots below the threshold are silently
+#                     dropped from candidate lists for those continents. Values 58/68
+#                     correspond to the in-game zone entry levels.
+#        Default:     58 (Outland), 68 (Northrend)
+
+AiPlayerbot.MinLevelOutland = 58
+AiPlayerbot.MinLevelNorthrend = 68

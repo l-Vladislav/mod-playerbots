@@ -108,6 +108,16 @@ public:
     std::string randomBotMapsAsString;
     float probTeleToBankers;
     bool enableWeightTeleToCityBankers;
+    bool preferRealPlayerZones;
+    float preferRealPlayerZoneChance;
+    uint32 realPlayerZoneRefreshInterval;
+    uint32 maxBotsPerPlayer;
+    float playerBiasMinRadius;
+    float playerBiasMaxRadius;
+    int32 playerBiasLevelTolerance;
+    std::string playerBiasArrivalStrategy;
+    uint32 minLevelOutland;
+    uint32 minLevelNorthrend;
     int weightTeleToStormwind;
     int weightTeleToIronforge;
     int weightTeleToDarnassus;

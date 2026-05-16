@@ -146,6 +146,16 @@ bool PlayerbotAIConfig::Initialize()
     LoadList<std::vector<uint32>>(randomBotMapsAsString, randomBotMaps);
     probTeleToBankers = sConfigMgr->GetOption<float>("AiPlayerbot.ProbTeleToBankers", 0.25f);
     enableWeightTeleToCityBankers = sConfigMgr->GetOption<bool>("AiPlayerbot.EnableWeightTeleToCityBankers", false);
+    preferRealPlayerZones = sConfigMgr->GetOption<bool>("AiPlayerbot.PreferRealPlayerZones", false);
+    preferRealPlayerZoneChance = sConfigMgr->GetOption<float>("AiPlayerbot.PreferRealPlayerZoneChance", 0.75f);
+    realPlayerZoneRefreshInterval = sConfigMgr->GetOption<uint32>("AiPlayerbot.RealPlayerZoneRefreshInterval", 900);
+    maxBotsPerPlayer = sConfigMgr->GetOption<uint32>("AiPlayerbot.MaxBotsPerPlayer", 5);
+    playerBiasMinRadius = sConfigMgr->GetOption<float>("AiPlayerbot.PlayerBiasMinRadius", 50.0f);
+    playerBiasMaxRadius = sConfigMgr->GetOption<float>("AiPlayerbot.PlayerBiasMaxRadius", 100.0f);
+    playerBiasLevelTolerance = sConfigMgr->GetOption<int32>("AiPlayerbot.PlayerBiasLevelTolerance", 10);
+    playerBiasArrivalStrategy = sConfigMgr->GetOption<std::string>("AiPlayerbot.PlayerBiasArrivalStrategy", "+grind,-travel,-rpg");
+    minLevelOutland = sConfigMgr->GetOption<uint32>("AiPlayerbot.MinLevelOutland", 58);
+    minLevelNorthrend = sConfigMgr->GetOption<uint32>("AiPlayerbot.MinLevelNorthrend", 68);
     weightTeleToStormwind = sConfigMgr->GetOption<int>("AiPlayerbot.TeleToStormwindWeight", 2);
     weightTeleToIronforge = sConfigMgr->GetOption<int>("AiPlayerbot.TeleToIronforgeWeight", 1);
     weightTeleToDarnassus = sConfigMgr->GetOption<int>("AiPlayerbot.TeleToDarnassusWeight", 1);
