@@ -71,6 +71,12 @@ std::string& trim(std::string& s);
 
 std::set<std::string> PlayerbotAI::unsecuredCommands;
 
+// Perf fix (lag hunt follow-up): see comments on the declarations in PlayerbotAI.h and
+// on PlayerbotMgr::HandleMasterIncomingPacket/HandleMasterOutgoingPacket.
+std::set<uint16> PlayerbotAI::masterIncomingOpcodeCache;
+std::set<uint16> PlayerbotAI::masterOutgoingOpcodeCache;
+bool PlayerbotAI::masterOpcodeCacheReady = false;
+
 PlayerbotChatHandler::PlayerbotChatHandler(Player* pMasterPlayer) : ChatHandler(pMasterPlayer->GetSession()) {}
 
 uint32 PlayerbotChatHandler::extractQuestId(std::string const str)
@@ -102,6 +108,14 @@ void PacketHandlingHelper::AddPacket(WorldPacket const& packet)
     // assert(packet.GetOpcode());
     if (handlers.find(packet.GetOpcode()) != handlers.end())
         queue.push(WorldPacket(packet));
+}
+
+std::set<uint16> PacketHandlingHelper::GetOpcodes() const
+{
+    std::set<uint16> opcodes;
+    for (auto const& entry : handlers)
+        opcodes.insert(entry.first);
+    return opcodes;
 }
 
 PlayerbotAI::PlayerbotAI()
@@ -218,6 +232,18 @@ PlayerbotAI::PlayerbotAI(Player* bot)
     // SMSG_QUESTUPDATE_ADD_ITEM no longer used
     // botOutgoingPacketHandlers.AddHandler(SMSG_QUESTUPDATE_ADD_ITEM, "quest update add item");
     botOutgoingPacketHandlers.AddHandler(SMSG_QUEST_CONFIRM_ACCEPT, "confirm quest");
+
+    // Perf fix (lag hunt follow-up): every PlayerbotAI registers the exact same fixed
+    // master opcode sets above, so cache them once (from whichever bot happens to be
+    // constructed first) instead of hardcoding a duplicate opcode list elsewhere. This
+    // backs PlayerbotAI::IsMasterIncomingOpcodeRegistered/IsMasterOutgoingOpcodeRegistered,
+    // which PlayerbotMgr uses to skip its O(bots) fan-out loop for opcodes nobody handles.
+    if (!masterOpcodeCacheReady)
+    {
+        masterIncomingOpcodeCache = masterIncomingPacketHandlers.GetOpcodes();
+        masterOutgoingOpcodeCache = masterOutgoingPacketHandlers.GetOpcodes();
+        masterOpcodeCacheReady = true;
+    }
 }
 
 PlayerbotAI::~PlayerbotAI()
@@ -1420,6 +1446,16 @@ void PlayerbotAI::HandleMasterIncomingPacket(WorldPacket const& packet)
 void PlayerbotAI::HandleMasterOutgoingPacket(WorldPacket const& packet)
 {
     masterOutgoingPacketHandlers.AddPacket(packet);
+}
+
+bool PlayerbotAI::IsMasterIncomingOpcodeRegistered(uint16 opcode)
+{
+    return masterIncomingOpcodeCache.find(opcode) != masterIncomingOpcodeCache.end();
+}
+
+bool PlayerbotAI::IsMasterOutgoingOpcodeRegistered(uint16 opcode)
+{
+    return masterOutgoingOpcodeCache.find(opcode) != masterOutgoingOpcodeCache.end();
 }
 
 void PlayerbotAI::ChangeEngine(BotState type)

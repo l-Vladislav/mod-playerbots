@@ -348,6 +348,10 @@ public:
     void AddHandler(uint16 opcode, std::string const handler);
     void Handle(ExternalEventHelper& helper);
     void AddPacket(WorldPacket const& packet);
+    // Perf: read-only snapshot of the registered opcode keys (no queue access).
+    // Used to build a static "does anyone care about this opcode" cache -- see
+    // PlayerbotAI::IsMasterIncomingOpcodeRegistered/IsMasterOutgoingOpcodeRegistered.
+    std::set<uint16> GetOpcodes() const;
 
 private:
     std::map<uint16, std::string> handlers;
@@ -395,6 +399,16 @@ public:
     void HandleBotOutgoingPacket(WorldPacket const& packet);
     void HandleMasterIncomingPacket(WorldPacket const& packet);
     void HandleMasterOutgoingPacket(WorldPacket const& packet);
+    // Perf: O(1) opcode membership checks used by PlayerbotMgr::HandleMasterIncomingPacket/
+    // HandleMasterOutgoingPacket (PlayerbotMgr.cpp) to skip their O(bots) fan-out loop
+    // entirely when the opcode has no registered master handler anyway (AddPacket()
+    // already no-ops in that case -- this just avoids paying for the loop + the
+    // GET_PLAYERBOT_AI lookup on every owned + random bot first). Every PlayerbotAI
+    // instance registers the exact same fixed opcode set in its constructor, so caching
+    // it once from the first bot ever constructed is safe and won't rot on upstream
+    // syncs (no hardcoded opcode list here).
+    static bool IsMasterIncomingOpcodeRegistered(uint16 opcode);
+    static bool IsMasterOutgoingOpcodeRegistered(uint16 opcode);
     void HandleTeleportAck();
     void ChangeEngine(BotState type);
     void ChangeEngineOnCombat();
@@ -625,6 +639,12 @@ private:
         return player && player->GetSession() && player->IsInWorld() && !player->IsDuringRemoveFromWorld() &&
                !player->IsBeingTeleported();
     }
+    // Perf: opcode-only caches backing IsMasterIncomingOpcodeRegistered/
+    // IsMasterOutgoingOpcodeRegistered above. Deliberately just the opcode set (not a
+    // PacketHandlingHelper) so no per-bot queue state is ever shared statically.
+    static std::set<uint16> masterIncomingOpcodeCache;
+    static std::set<uint16> masterOutgoingOpcodeCache;
+    static bool masterOpcodeCacheReady;
 protected:
     Player* bot;
     Player* master;

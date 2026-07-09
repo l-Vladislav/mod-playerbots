@@ -1518,23 +1518,37 @@ void PlayerbotMgr::HandleCommand(uint32 type, std::string const text)
 
 void PlayerbotMgr::HandleMasterIncomingPacket(WorldPacket const& packet)
 {
-    for (PlayerBotMap::const_iterator it = GetPlayerBotsBegin(); it != GetPlayerBotsEnd(); ++it)
+    // Perf fix (lag hunt, 2026-07): PacketHandlingHelper::AddPacket() already no-ops for
+    // opcodes that no bot registered a master-incoming handler for (see PlayerbotAI.cpp),
+    // but reaching that no-op still meant scanning every owned bot AND all ~1800 random
+    // bots, with a GET_PLAYERBOT_AI lookup (map find + dynamic_cast) per bot, for every
+    // single packet a real player sends -- including chat/movement/casts that no master
+    // handler cares about. Skip both fan-out loops up front when the opcode isn't
+    // registered by anyone. The registered set is identical for every PlayerbotAI
+    // (owned or random bot alike -- all populated in the same constructor), so this is a
+    // behavior-preserving early-out, not a heuristic. The logout switch below must still
+    // run unconditionally (CMSG_LOGOUT_REQUEST/CMSG_LOGOUT_CANCEL aren't in the master
+    // handler map at all), so only the loops are guarded.
+    if (PlayerbotAI::IsMasterIncomingOpcodeRegistered(packet.GetOpcode()))
     {
-        Player* const bot = it->second;
-        if (!bot)
-            continue;
-        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
-        if (botAI)
-            botAI->HandleMasterIncomingPacket(packet);
-    }
+        for (PlayerBotMap::const_iterator it = GetPlayerBotsBegin(); it != GetPlayerBotsEnd(); ++it)
+        {
+            Player* const bot = it->second;
+            if (!bot)
+                continue;
+            PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+            if (botAI)
+                botAI->HandleMasterIncomingPacket(packet);
+        }
 
-    for (PlayerBotMap::const_iterator it = sRandomPlayerbotMgr.GetPlayerBotsBegin();
-         it != sRandomPlayerbotMgr.GetPlayerBotsEnd(); ++it)
-    {
-        Player* const bot = it->second;
-        PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
-        if (botAI && botAI->GetMaster() == GetMaster())
-            botAI->HandleMasterIncomingPacket(packet);
+        for (PlayerBotMap::const_iterator it = sRandomPlayerbotMgr.GetPlayerBotsBegin();
+             it != sRandomPlayerbotMgr.GetPlayerBotsEnd(); ++it)
+        {
+            Player* const bot = it->second;
+            PlayerbotAI* botAI = GET_PLAYERBOT_AI(bot);
+            if (botAI && botAI->GetMaster() == GetMaster())
+                botAI->HandleMasterIncomingPacket(packet);
+        }
     }
 
     switch (packet.GetOpcode())
@@ -1574,6 +1588,13 @@ void PlayerbotMgr::HandleMasterIncomingPacket(WorldPacket const& packet)
 
 void PlayerbotMgr::HandleMasterOutgoingPacket(WorldPacket const& packet)
 {
+    // Perf fix (lag hunt, 2026-07): see the matching comment in
+    // HandleMasterIncomingPacket above. There is nothing after these two loops in this
+    // function, so a direct early-return is exactly equivalent (unlike the incoming
+    // case, which has an unconditional logout switch afterward).
+    if (!PlayerbotAI::IsMasterOutgoingOpcodeRegistered(packet.GetOpcode()))
+        return;
+
     for (PlayerBotMap::const_iterator it = GetPlayerBotsBegin(); it != GetPlayerBotsEnd(); ++it)
     {
         Player* const bot = it->second;
