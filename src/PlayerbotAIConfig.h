@@ -128,6 +128,10 @@ public:
     std::set<uint32> disallowedGameObjects;
     std::set<uint32> attunementQuests;
     std::set<uint32> unobtainableItems;
+    // Highest item entry bots may be given as gear; 0 means no limit (upstream
+    // behaviour). A list of ids cannot express this - server-generated content
+    // runs to hundreds of thousands of entries in contiguous blocks.
+    uint32 maxAllowedItemId;
 
     uint32 openGoSpell;
     bool randomBotAutologin;

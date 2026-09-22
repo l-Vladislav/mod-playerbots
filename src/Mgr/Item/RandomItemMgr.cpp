@@ -1436,6 +1436,15 @@ bool RandomItemMgr::IsValidItem(ItemTemplate const* proto)
     if (sPlayerbotAIConfig.unobtainableItems.contains(proto->ItemId))
         return false;
 
+    // Skip server-custom items: generated content (crafted bases, unfinished
+    // blanks, worn-drop copies, upgrade tiers) lives in its own high entry
+    // blocks and is not meant to be handed out as bot gear. A list of ids
+    // cannot express this - there are hundreds of thousands of them - so the
+    // cutoff is a single id below which everything is stock 3.3.5a content.
+    // 0 disables the check and restores upstream behaviour.
+    if (sPlayerbotAIConfig.maxAllowedItemId && proto->ItemId > sPlayerbotAIConfig.maxAllowedItemId)
+        return false;
+
     return true;
 }
 

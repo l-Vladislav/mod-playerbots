@@ -1198,6 +1198,19 @@ AiPlayerbot.RandomGearLoweringChance = 0
 #           Oracle Talisman of Ablution test/on-use row (44870), Totem of the Earthen Ring (46978)
 AiPlayerbot.UnobtainableItems = 12468,44869,44870,46978
 
+#
+#    AiPlayerbot.MaxAllowedItemId
+#        Highest item_template entry bots may receive as gear. Items above it
+#        are skipped by every bot item cache (equipment, ammo, food, potions,
+#        trade goods). Use it on servers that generate their own items in high
+#        entry blocks - those are content for players, not bot starting gear.
+#        Stock 3.3.5a content ends at entry 57576.
+#        0 - no limit (default, upstream behaviour)
+#    Default: 0
+#
+
+AiPlayerbot.MaxAllowedItemId = 0
+
 # Randombots check player's gearscore level and deny the group invitation if it's too low
 # Default: 0 (disabled)
 AiPlayerbot.GearScoreCheck = 0
