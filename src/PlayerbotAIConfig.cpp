@@ -238,6 +238,10 @@ bool PlayerbotAIConfig::Initialize()
         sConfigMgr->GetOption<std::string>("AiPlayerbot.UnobtainableItems", "12468,44869,44870,46978"),
         unobtainableItems);
 
+    // Defaults to 0 so a build without this line in its config behaves exactly
+    // as upstream does: nothing is filtered out.
+    maxAllowedItemId = sConfigMgr->GetOption<uint32>("AiPlayerbot.MaxAllowedItemId", 0);
+
     botAutologin = sConfigMgr->GetOption<bool>("AiPlayerbot.BotAutologin", false);
     randomBotAutologin = sConfigMgr->GetOption<bool>("AiPlayerbot.RandomBotAutologin", true);
     minRandomBots = sConfigMgr->GetOption<int32>("AiPlayerbot.MinRandomBots", 500);
